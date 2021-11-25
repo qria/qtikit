@@ -7,6 +7,8 @@ import Prompt from 'src/components/Prompt';
 import {createStyle} from 'src/utils/style';
 import {getPropsByElement} from 'src/utils/node';
 
+import {useInteractionState} from '../InteractionState';
+
 const tableStyle = createStyle({
   tableLayout: 'fixed',
   width: '100%',
@@ -18,182 +20,165 @@ const cellStyle = createStyle({
   border: '1px solid #444444',
 });
 
-type SimpleAssociableChoice = SimpleAssociableChoiceCharacteristics & Element;
+type SimpleAssociableChoice = Omit<SimpleAssociableChoiceCharacteristics, 'identifier' | 'matchMax'> & {
+  identifier: string;
+  textContent: any;
+  matchMax: number;
+  matchCount: number;
+  children: any;
+};
 
-interface MaxMatch {
-  max: number;
-  checked: number;
+const SEPARATOR = ' ';
+
+function getAssociableChoice(choice: Element): SimpleAssociableChoice {
+  const {matchMax, identifier} = getPropsByElement(choice);
+  return {
+    identifier: identifier as string,
+    matchMax: Number(matchMax),
+    textContent: choice.textContent?.trim(),
+    matchCount: 0,
+    children: {},
+  };
 }
 
-class MatchState {
-  private maxMatchSet: {[key: string]: MaxMatch} = {};
-  private responses: string[] = [];
-  constructor(
-    public matchSet: SimpleAssociableChoice[][],
-    public maxAssociations: number = 0,
-    public minAssociations: number = 0 // public selected: string[] = []
-  ) {
-    if (maxAssociations < minAssociations) {
-      throw new Error('maxAssociations must be greater than or equal to minAssociations');
-    }
+type ChoiceIdentifier = Record<string, SimpleAssociableChoice>;
 
-    // FIXME, cannot be a member
-    console.log('maxAssociations', maxAssociations);
+interface ChoiceTable {
+  rows: string[];
+  cols: string[];
+  identifiers: ChoiceIdentifier;
+}
 
-    for (const match of matchSet) {
-      for (const choice of match) {
-        const props = {...getPropsByElement(choice)};
-        this.maxMatchSet[props.identifier as string] = {
-          max: Number(props.matchMax),
-          checked: 0,
-        };
-      }
-    }
+function getChoices(element: Element): ChoiceTable {
+  const matchSet = [...element.querySelectorAll('simpleMatchSet')]
+    .sort((rows, cols) => rows.children.length - cols.children.length)
+    .map(set => Array.from(set.children));
 
-    console.log('this.maxMatchSet', this.maxMatchSet);
+  const identifiers: ChoiceIdentifier = {};
 
-    this.isAddable.bind(this);
-    this.canBeSubmitted.bind(this);
-    this.submitResponse.bind(this);
-    this.removeResponse.bind(this);
-    this.isSubmitted.bind(this);
-    this.check.bind(this);
-    this.uncheck.bind(this);
-  }
+  const getElement = (choice: Element) => {
+    const props = getAssociableChoice(choice);
+    identifiers[props.identifier] = props;
+    return props.identifier;
+  };
 
-  isAddable(identifiers: string): boolean {
-    const maxMatch = this.maxMatchSet[identifiers];
-    return !(maxMatch.max === 0 || maxMatch.checked >= maxMatch.max);
-  }
+  const rows = matchSet[1].map(getElement);
+  const cols = matchSet[0].map(getElement);
 
-  canBeSubmitted(): boolean {
-    console.log(
-      'this.maxAssociations === 0 || this.responses.length < this.maxAssociations;',
-      this.maxAssociations,
-      this.responses.length,
-      this
-    );
-    return this.maxAssociations === 0 || this.responses.length < this.maxAssociations;
-  }
-
-  submitResponse(identifier: string) {
-    this.responses.push(identifier);
-  }
-
-  removeResponse(identifier: string) {
-    const index = this.responses.indexOf(identifier);
-    if (index > -1) {
-      this.responses.splice(index, 1);
-    }
-  }
-
-  isSubmitted(identifier: string): boolean {
-    return this.responses.indexOf(identifier) > -1;
-  }
-
-  check(identifier: string): boolean {
-    const ids = identifier.split(' ');
-    if (this.canBeSubmitted() && this.isAddable(ids[0]) && this.isAddable(ids[1])) {
-      this.maxMatchSet[ids[0]].checked++;
-      this.maxMatchSet[ids[1]].checked++;
-      return true;
-    }
-
-    return false;
-  }
-
-  uncheck(identifier: string) {
-    const ids = identifier.split(' ');
-    this.maxMatchSet[ids[0]].checked--;
-    this.maxMatchSet[ids[1]].checked--;
-
-    this.removeResponse(identifier);
-  }
+  return {rows, cols, identifiers};
 }
 
 const MatchInteraction: React.FC<MatchInteractionProps | any> = ({
   responseIdentifier,
   maxAssociations,
-  minAssociations,
-  node,
+  elementChildren,
 }) => {
   const getKey = (id: number) => `qti-component-${responseIdentifier}-${id}`;
-  const prompt = node.querySelector('prompt');
-  const matchSet = [...node.querySelectorAll('simpleMatchSet')]
-    .map(matchSet => [...matchSet.children])
-    .sort((f, s) => f.length - s.length);
-  const associations = {
-    max: maxAssociations ?? 0,
-    min: Math.min(minAssociations ?? 0, maxAssociations ?? 0),
-  };
-  console.log('maxAssociations', maxAssociations, maxAssociations ?? 0, associations.max);
-  const matchState = new MatchState(matchSet, associations.max, associations.min);
+  const [interactionState, setInteractionState] = useInteractionState({
+    responseIdentifier,
+    encode: userInput =>
+      userInput.reduce((interactionState, indentifier) => ({...interactionState, [indentifier]: true}), {}),
+    decode: interactionState =>
+      Object.entries(interactionState)
+        .filter(([, checked]) => checked)
+        .map(([identifier]) => identifier),
+  });
+  const prompt = elementChildren.querySelector('prompt');
+  const [choices, setChoices] = React.useState(getChoices(elementChildren));
+
+  console.log('interactionState', interactionState);
+  console.log('choices', choices);
+
+  const isChecked = (identifier: string) => interactionState[identifier] === true;
 
   const handleClick: React.PointerEventHandler<HTMLInputElement> = event => {
+    event.preventDefault();
+
     const {
       dataset: {identifier},
     } = event.currentTarget;
-    if (!matchState.isSubmitted(identifier as string)) {
-      if (!matchState.check(identifier as string)) {
-        console.log('rejected', identifier);
-        event.preventDefault();
-        event.stopPropagation();
+
+    if (!identifier) {
+      return;
+    }
+
+    const [row, col] = identifier.split(SEPARATOR).map(identifier => choices.identifiers[identifier]);
+    const checked = isChecked(identifier);
+
+    if (!checked) {
+      if (maxAssociations === 0 || Object.keys(interactionState).length >= maxAssociations) {
+        console.log('Rejected from over max association');
         return;
       }
 
-      console.log('submited', identifier);
-    } else {
-      matchState.uncheck(identifier as string);
-      console.log('removed', identifier);
+      if (row.matchCount + 1 > row.matchMax || col.matchCount + 1 > col.matchMax) {
+        console.log('Rejected from over match count', row, col);
+        return;
+      }
     }
 
-    console.log('matchState', matchState);
-    // TODO send response
-  };
+    row.matchCount += !checked ? 1 : -1;
+    col.matchCount += !checked ? 1 : -1;
 
-  const HeaderColums = (choices: SimpleAssociableChoice[]) => {
-    return (
-      <tr>
-        <th></th>
-        {choices.map((choice, index) => (
-          <td style={cellStyle} key={getKey(index)}>
-            {choice.textContent}
-          </td>
-        ))}
-      </tr>
-    );
-  };
+    setInteractionState({
+      ...interactionState,
+      [identifier]: !checked,
+    });
 
-  const ChoiceColums = (firstChoices: SimpleAssociableChoice[], secondChoices: SimpleAssociableChoice[]) => {
-    return firstChoices.map((first, rowIndex) => {
-      const firstProps = {...getPropsByElement(first)};
-      return (
-        <tr key={`qti-component-${firstProps.identifier}-${rowIndex}`}>
-          <th style={cellStyle}>{first.textContent}</th>
-          {secondChoices.map((second, colIndex) => {
-            const secondProps = {...getPropsByElement(second)};
-            return (
-              <td style={cellStyle} key={getKey(colIndex)}>
-                <input
-                  data-identifier={`${firstProps.identifier} ${secondProps.identifier}`}
-                  type="checkbox"
-                  onClick={handleClick}
-                />
-              </td>
-            );
-          })}
-        </tr>
-      );
+    setChoices({
+      ...choices,
+      identifiers: {
+        ...choices.identifiers,
+        [row.identifier]: row,
+        [col.identifier]: col,
+      },
     });
   };
+
+  interface RowProp {
+    choices: ChoiceTable;
+  }
+
+  const HeaderRow: React.FC<RowProp> = ({choices}) => (
+    <tr>
+      <th></th>
+      {choices.cols.map((col, index) => (
+        <td style={cellStyle} key={getKey(index)}>
+          {choices.identifiers[col].textContent}
+        </td>
+      ))}
+    </tr>
+  );
+
+  const BodyRow: React.FC<RowProp> = ({choices}) => (
+    <>
+      {choices.rows.map((row, rowIndex) => (
+        <tr key={getKey(rowIndex)}>
+          <th style={cellStyle}>{choices.identifiers[row].textContent}</th>
+          {choices.cols.map((col, colIndex: number) => (
+            <td style={cellStyle} key={getKey(colIndex)}>
+              <input
+                defaultChecked={isChecked(
+                  `${choices.identifiers[row].identifier} ${choices.identifiers[col].identifier}`
+                )}
+                type="checkbox"
+                data-identifier={`${choices.identifiers[row].identifier} ${choices.identifiers[col].identifier}`}
+                onClick={handleClick}
+              />
+            </td>
+          ))}
+        </tr>
+      ))}
+    </>
+  );
 
   return (
     <div>
       {prompt && <Prompt>{prompt?.textContent}</Prompt>}
       <table style={tableStyle}>
         <tbody>
-          {HeaderColums(matchSet[0])}
-          {ChoiceColums(matchSet[1], matchSet[0])}
+          <HeaderRow choices={choices} />
+          <BodyRow choices={choices} />
         </tbody>
       </table>
     </div>

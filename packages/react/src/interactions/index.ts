@@ -87,11 +87,15 @@ export function isFlowGroupInteraction(node: Node): boolean {
 }
 
 export interface FlowGroupInteractionProps {
-  node: Node;
+  elementChildren: Element;
 }
 
 export function createFlowGroupInteractionComponent(element: Element, defaultProps: Props): React.ReactElement | null {
-  const props = {...defaultProps, node: element, ...getPropsByElement(element)};
+  const props = {
+    ...defaultProps,
+    elementChildren: element,
+    ...getPropsByElement(element),
+  };
 
   const componentMap: Record<FlowGroupInteractionName, React.FC> = {
     matchInteraction: MatchInteraction,
