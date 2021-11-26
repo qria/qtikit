@@ -7,7 +7,7 @@ import Prompt from 'src/components/Prompt';
 import {createStyle} from 'src/utils/style';
 import {getPropsByElement} from 'src/utils/node';
 
-import {useInteractionState} from '../InteractionState';
+import InteractionStateContext, {useInteractionState, useInteractionStateContext} from '../InteractionState';
 
 const tableStyle = createStyle({
   tableLayout: 'fixed',
@@ -25,7 +25,6 @@ type SimpleAssociableChoice = Omit<SimpleAssociableChoiceCharacteristics, 'ident
   textContent: any;
   matchMax: number;
   matchCount: number;
-  children: any;
 };
 
 const SEPARATOR = ' ';
@@ -37,36 +36,88 @@ function getAssociableChoice(choice: Element): SimpleAssociableChoice {
     matchMax: Number(matchMax),
     textContent: choice.textContent?.trim(),
     matchCount: 0,
-    children: {},
   };
 }
 
-type ChoiceIdentifier = Record<string, SimpleAssociableChoice>;
+const useChoiceInteractionState = ({
+  rowIdentifier,
+  colIdentifier,
+  maxAssociations,
+  choices,
+}: {
+  rowIdentifier: string;
+  colIdentifier: string;
+  maxAssociations: number;
+  choices: SimpleAssociableChoice[][];
+}): [boolean, () => void] => {
+  const {interactionState, setInteractionState} = useInteractionStateContext();
 
-interface ChoiceTable {
-  rows: string[];
-  cols: string[];
-  identifiers: ChoiceIdentifier;
+  const isChecked = React.useMemo(
+    () => ((interactionState[rowIdentifier] ?? []) as string[]).includes(colIdentifier),
+    [colIdentifier, interactionState, rowIdentifier]
+  );
+
+  return [
+    isChecked,
+    React.useCallback(() => {
+      const col = choices[0].find(choice => choice.identifier === colIdentifier);
+      const row = choices[1].find(choice => choice.identifier === rowIdentifier);
+      if (!col || !row) {
+        return;
+      }
+      const cols = (interactionState[rowIdentifier] ?? []) as string[];
+      if (!isChecked) {
+        const associationCount = Object.values(interactionState).reduce<number>(
+          (count, values) => count + (values as string[]).length,
+          0
+        );
+        if (associationCount >= maxAssociations) {
+          console.log('rejected, max associations reached');
+          return;
+        }
+        if (col.matchCount + 1 > col.matchMax || row.matchCount + 1 > row.matchMax) {
+          console.log('rejected, max associations reached');
+          return;
+        }
+        col.matchCount++;
+        row.matchCount++;
+        setInteractionState({
+          ...interactionState,
+          [rowIdentifier]: [...cols, colIdentifier],
+        });
+      } else {
+        col.matchCount--;
+        row.matchCount--;
+        setInteractionState({
+          ...interactionState,
+          [rowIdentifier]: [...cols.filter(c => c !== colIdentifier)],
+        });
+      }
+    }, [choices, interactionState, maxAssociations, rowIdentifier, isChecked, colIdentifier, setInteractionState]),
+  ];
+};
+
+interface ChoiceProps {
+  row: string;
+  col: string;
+  maxAssociations: number;
+  choices: SimpleAssociableChoice[][];
 }
 
-function getChoices(element: Element): ChoiceTable {
-  const matchSet = [...element.querySelectorAll('simpleMatchSet')]
-    .sort((rows, cols) => rows.children.length - cols.children.length)
-    .map(set => Array.from(set.children));
+const Choice: React.FC<ChoiceProps> = ({row, col, choices, maxAssociations}) => {
+  const [checked, setChecked] = useChoiceInteractionState({
+    rowIdentifier: row,
+    colIdentifier: col,
+    maxAssociations,
+    choices,
+  });
 
-  const identifiers: ChoiceIdentifier = {};
-
-  const getElement = (choice: Element) => {
-    const props = getAssociableChoice(choice);
-    identifiers[props.identifier] = props;
-    return props.identifier;
+  const handleChange: React.ChangeEventHandler<HTMLInputElement> = () => {
+    setChecked();
   };
 
-  const rows = matchSet[1].map(getElement);
-  const cols = matchSet[0].map(getElement);
-
-  return {rows, cols, identifiers};
-}
+  return <input type="checkbox" checked={checked || false} onChange={handleChange} />;
+};
 
 const MatchInteraction: React.FC<MatchInteractionProps | any> = ({
   responseIdentifier,
@@ -74,102 +125,63 @@ const MatchInteraction: React.FC<MatchInteractionProps | any> = ({
   elementChildren,
 }) => {
   const getKey = (id: number) => `qti-component-${responseIdentifier}-${id}`;
+
   const [interactionState, setInteractionState] = useInteractionState({
     responseIdentifier,
-    encode: userInput =>
-      userInput.reduce((interactionState, indentifier) => ({...interactionState, [indentifier]: true}), {}),
-    decode: interactionState =>
-      Object.entries(interactionState)
-        .filter(([, checked]) => checked)
-        .map(([identifier]) => identifier),
+    encode: userInput => {
+      return userInput.reduce((interactionState, input) => {
+        const [key, value] = input.split(SEPARATOR);
+        const cols = (interactionState[key] ?? []) as string[];
+        return {...interactionState, [key]: [...cols, value]};
+      }, {} as {[key: string]: string[]});
+    },
+    decode: interactionState => {
+      // FIXME, generate count map
+      return Object.entries(interactionState).reduce((response, [key, values]) => {
+        (values as string[]).forEach(value => response.push(`${key}${SEPARATOR}${value}`));
+        return response;
+      }, [] as string[]);
+    },
   });
-  const prompt = elementChildren.querySelector('prompt');
-  const [choices, setChoices] = React.useState(getChoices(elementChildren));
 
-  console.log('interactionState', interactionState);
-  console.log('choices', choices);
+  const prompt = React.useMemo(() => elementChildren.querySelector('prompt'), [elementChildren]);
+  const matchSet = React.useMemo(() => {
+    return [...elementChildren.querySelectorAll('simpleMatchSet')]
+      .sort((rows, cols) => rows.children.length - cols.children.length)
+      .map(set => Array.from(set.children).map(child => getAssociableChoice(child as Element)));
+  }, [elementChildren]);
 
-  const isChecked = (identifier: string) => interactionState[identifier] === true;
-
-  const handleClick: React.PointerEventHandler<HTMLInputElement> = event => {
-    event.preventDefault();
-
-    const {
-      dataset: {identifier},
-    } = event.currentTarget;
-
-    if (!identifier) {
-      return;
-    }
-
-    const [row, col] = identifier.split(SEPARATOR).map(identifier => choices.identifiers[identifier]);
-    const checked = isChecked(identifier);
-
-    if (!checked) {
-      if (maxAssociations === 0 || Object.keys(interactionState).length >= maxAssociations) {
-        console.log('Rejected from over max association');
-        return;
-      }
-
-      if (row.matchCount + 1 > row.matchMax || col.matchCount + 1 > col.matchMax) {
-        console.log('Rejected from over match count', row, col);
-        return;
-      }
-    }
-
-    row.matchCount += !checked ? 1 : -1;
-    col.matchCount += !checked ? 1 : -1;
-
-    setInteractionState({
-      ...interactionState,
-      [identifier]: !checked,
-    });
-
-    setChoices({
-      ...choices,
-      identifiers: {
-        ...choices.identifiers,
-        [row.identifier]: row,
-        [col.identifier]: col,
-      },
-    });
-  };
-
-  interface RowProp {
-    choices: ChoiceTable;
-  }
-
-  const HeaderRow: React.FC<RowProp> = ({choices}) => (
+  const HeaderRow = () => (
     <tr>
       <th></th>
-      {choices.cols.map((col, index) => (
+      {matchSet[0].map(({textContent}, index) => (
         <td style={cellStyle} key={getKey(index)}>
-          {choices.identifiers[col].textContent}
+          {textContent}aa
         </td>
       ))}
     </tr>
   );
 
-  const BodyRow: React.FC<RowProp> = ({choices}) => (
-    <>
-      {choices.rows.map((row, rowIndex) => (
+  const BodyRow = () => (
+    <InteractionStateContext.Provider value={{interactionState, setInteractionState}}>
+      {matchSet[1].map(({identifier: row, textContent}, rowIndex) => (
         <tr key={getKey(rowIndex)}>
-          <th style={cellStyle}>{choices.identifiers[row].textContent}</th>
-          {choices.cols.map((col, colIndex: number) => (
+          <th style={cellStyle}>{textContent}</th>
+          {matchSet[0].map(({identifier: col}, colIndex) => (
             <td style={cellStyle} key={getKey(colIndex)}>
-              <input
-                defaultChecked={isChecked(
-                  `${choices.identifiers[row].identifier} ${choices.identifiers[col].identifier}`
-                )}
-                type="checkbox"
-                data-identifier={`${choices.identifiers[row].identifier} ${choices.identifiers[col].identifier}`}
-                onClick={handleClick}
-              />
+              <Choice
+                {...{
+                  row,
+                  col,
+                  // FIXME, not all of the match data
+                  choices: matchSet,
+                  maxAssociations,
+                }}></Choice>
             </td>
           ))}
         </tr>
       ))}
-    </>
+    </InteractionStateContext.Provider>
   );
 
   return (
@@ -177,8 +189,8 @@ const MatchInteraction: React.FC<MatchInteractionProps | any> = ({
       {prompt && <Prompt>{prompt?.textContent}</Prompt>}
       <table style={tableStyle}>
         <tbody>
-          <HeaderRow choices={choices} />
-          <BodyRow choices={choices} />
+          <HeaderRow />
+          <BodyRow />
         </tbody>
       </table>
     </div>

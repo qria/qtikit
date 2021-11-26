@@ -5,7 +5,7 @@ import {QtiViewerContext} from '../QtiViewer';
 import {InteractionElementName} from '.';
 
 interface InteractionState {
-  [identifier: string]: string | number | boolean | undefined;
+  [identifier: string]: string | string[] | number | boolean | undefined;
 }
 
 type InteractionStateEncoder = (userInput: UserInput[string]) => InteractionState;
