@@ -19,7 +19,7 @@ qtikit-interaction__graphic-gap-match {}
 .qtikit-interaction__hottext {}
 
 .qtikit-interaction__inline-choice {
-  display: inline;
+  display: inline-flex;
 }
 
 .qtikit-interaction__match {}
@@ -67,7 +67,7 @@ qtikit-interaction__graphic-gap-match {}
 }
 
 .qtikit-component__hotspot {
-  display: inline;
+  display: inline-flex;
 }
 
 .qtikit-component__hotspot-choice {
@@ -76,7 +76,7 @@ qtikit-interaction__graphic-gap-match {}
   cursor: pointer;
 }
 
-.qtikit-component__hotspot-choice label .checked {
+.qtikit-component__hotspot-choice.checked {
   background-color: rgba(255, 0, 0, .3);
 }
 
@@ -101,7 +101,7 @@ qtikit-interaction__graphic-gap-match {}
 .qtikit-component__select option {}
 
 .qtikit-component__checkbox {
-  display: inline;
+  display: inline-flex;
 }
 
 .qtikit-component__checkbox input {}
@@ -113,7 +113,7 @@ qtikit-interaction__graphic-gap-match {}
 .qtikit-component__slider > label {}
 
 .qtikit-component__textentry {
-  display: inline;
+  display: inline-flex;
 }
 
 .qtikit-component__textentry > input[type="text"] {
@@ -135,15 +135,15 @@ qtikit-interaction__graphic-gap-match {}
 }
 
 .qtikit-component__image {
-  display: inline
+  display: inline-flex
 }
 
 .qtikit-component__mathjax {
-  display: inline
+  display: inline-flex
 }
 
 .qtikit-component__object {
-  display: inline
+  display: inline-flex
 }
 
 .qtikit-component__prompt {}
