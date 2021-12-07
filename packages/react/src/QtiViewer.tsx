@@ -30,6 +30,7 @@ export interface QtiViewerProps {
   stylesheetSrc?: string;
   inputState: UserInput;
   onChange: (newState: UserInput) => void;
+  onError?: (error: string | null) => void;
 }
 
 interface QtiViewerContextValue extends QtiViewerProps {
@@ -85,14 +86,26 @@ const defaultValue: QtiViewerContextValue = {
   stylesheetSrc: '',
   inputState: {},
   onChange: () => {},
+  onError: () => {},
 };
 
-const QtiViewer: React.FC<QtiViewerProps> = ({assessmentItemSrc, stylesheetSrc, ...props}) => {
+const QtiViewer: React.FC<QtiViewerProps> = ({assessmentItemSrc, stylesheetSrc, onError, ...props}) => {
   const [assessmentItem, setAssessmentItem] = React.useState<AssessmentItem | null>(null);
 
+  const handleError = React.useMemo(() => onError ?? (() => {}), [onError]);
+
   useEffect(() => {
-    fetchAssessmentItem(assessmentItemSrc, stylesheetSrc).then(setAssessmentItem);
-  }, [assessmentItemSrc, stylesheetSrc]);
+    const loadAssessmentItem = async () => {
+      try {
+        console.log('reset error');
+        setAssessmentItem(await fetchAssessmentItem(assessmentItemSrc, stylesheetSrc));
+      } catch (e: any) {
+        handleError(e.toString());
+      }
+    };
+
+    loadAssessmentItem();
+  }, [assessmentItemSrc, stylesheetSrc, handleError]);
 
   return (
     <QtiViewerContext.Provider
