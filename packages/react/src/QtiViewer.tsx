@@ -97,7 +97,6 @@ const QtiViewer: React.FC<QtiViewerProps> = ({assessmentItemSrc, stylesheetSrc, 
   useEffect(() => {
     const loadAssessmentItem = async () => {
       try {
-        console.log('reset error');
         setAssessmentItem(await fetchAssessmentItem(assessmentItemSrc, stylesheetSrc));
       } catch (e: any) {
         handleError(e.toString());
